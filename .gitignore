@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+playwright-report
+test-results
+*.tsbuildinfo
+.vite
+*.log
+vite-dev.err
+vite-dev.log
