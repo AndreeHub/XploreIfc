@@ -7,11 +7,23 @@ interface ResultsPaneProps {
   inverseEntities: IfcEntity[];
   inverseEnabled: boolean;
   inverseLabel: string;
+  inverseTotal: number;
+  inverseQuerying: boolean;
   hasQuery: boolean;
   onSelectEntity: (id: string) => void;
 }
 
-export function ResultsPane({ filteredEntities, sourceText, inverseEntities, inverseEnabled, inverseLabel, hasQuery, onSelectEntity }: ResultsPaneProps) {
+export function ResultsPane({
+  filteredEntities,
+  sourceText,
+  inverseEntities,
+  inverseEnabled,
+  inverseLabel,
+  inverseTotal,
+  inverseQuerying,
+  hasQuery,
+  onSelectEntity
+}: ResultsPaneProps) {
   if (!hasQuery && !inverseEnabled) return null;
 
   return (
@@ -32,9 +44,11 @@ export function ResultsPane({ filteredEntities, sourceText, inverseEntities, inv
 
       {inverseEnabled ? (
         <section className="results-section" data-testid="incoming-list">
-          <div className="results-title">Inverse relationships for {inverseLabel} - {inverseEntities.length} hits</div>
+          <div className="results-title">
+            {inverseQuerying ? `Searching inverse references for ${inverseLabel}...` : `Inverse relationships for ${inverseLabel} - ${inverseTotal} hits`}
+          </div>
           <div className="results-list">
-            {inverseEntities.length === 0 ? <p>No inverse relationships for the selected item.</p> : null}
+            {!inverseQuerying && inverseEntities.length === 0 ? <p>No entries reference the selected id.</p> : null}
             {inverseEntities.map((entity) => (
               <button key={entity.id} type="button" onClick={() => onSelectEntity(entity.id)}>
                 <span>Line {entity.lineStart}</span>

@@ -13,6 +13,7 @@ interface RightSidebarProps {
   savedQueries: SavedQuery[];
   inverseEnabled: boolean;
   inverseCount: number;
+  inverseQuerying: boolean;
   onFile: (file: File) => void;
   onAddFilterValue: (value: string) => void;
   onRemoveFilter: (id: string) => void;
@@ -36,6 +37,7 @@ export function RightSidebar({
   savedQueries,
   inverseEnabled,
   inverseCount,
+  inverseQuerying,
   onFile,
   onAddFilterValue,
   onRemoveFilter,
@@ -173,7 +175,7 @@ export function RightSidebar({
       <div className="inverse-switch">
         <div>
           <strong>Inverse split</strong>
-          <span>{inverseCount} incoming refs</span>
+          <span>{inverseQuerying ? "Searching refs..." : `${inverseCount} incoming refs`}</span>
         </div>
         <button
           type="button"

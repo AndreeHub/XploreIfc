@@ -44,6 +44,8 @@ type WorkerRequest = {
   text?: string;
   file?: File;
   filters?: FilterChip[];
+  ids?: string[];
+  key?: string;
   startLine?: number;
   count?: number;
   id?: string;
@@ -68,6 +70,11 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     if (event.data.type === "query") {
       await handleQuery(event.data.filters ?? []);
+      return;
+    }
+
+    if (event.data.type === "inverse") {
+      await handleInverse(event.data.ids ?? [], event.data.key ?? "");
       return;
     }
 
@@ -139,6 +146,35 @@ async function handleQuery(filters: FilterChip[]) {
     truncated: allEntities.length > entities.length,
     text: buildFilteredText(entities, currentText)
   });
+}
+
+async function handleInverse(ids: string[], key: string) {
+  const targetIds = new Set(ids.map(normalizeId).filter(Boolean));
+  if (!targetIds.size) {
+    self.postMessage({ type: "inverse", key, entities: [], total: 0, truncated: false });
+    return;
+  }
+
+  if (hugeIndex && currentFile) {
+    const { entities, total } = await inverseHuge(targetIds);
+    self.postMessage({
+      type: "inverse",
+      key,
+      entities,
+      total,
+      truncated: total > entities.length
+    });
+    return;
+  }
+
+  if (!currentIndex) return;
+  const idsToHydrate = [...targetIds].flatMap((id) => currentIndex?.incoming[id] ?? []);
+  const uniqueIds = [...new Set(idsToHydrate)];
+  const entities = uniqueIds
+    .map((id) => currentIndex?.byId[id])
+    .filter((entity): entity is IfcEntity => Boolean(entity))
+    .slice(0, maxQueryResults);
+  self.postMessage({ type: "inverse", key, entities, total: uniqueIds.length, truncated: uniqueIds.length > entities.length });
 }
 
 async function handleLineRange(request: WorkerRequest) {
@@ -318,6 +354,20 @@ async function queryHuge(filters: FilterChip[]): Promise<{ entities: IfcEntity[]
   let total = 0;
   await forEachEntityRawBatch((meta, raw) => {
     if (!indexedIds.has(meta.id) && !terms.some((term) => raw.toLowerCase().includes(term))) return;
+    total += 1;
+    if (entities.length < maxQueryResults) entities.push(entityFromRaw(meta, raw));
+  });
+
+  return { entities, total };
+}
+
+async function inverseHuge(targetIds: Set<string>): Promise<{ entities: IfcEntity[]; total: number }> {
+  const entities: IfcEntity[] = [];
+  let total = 0;
+
+  await forEachEntityRawBatch((meta, raw) => {
+    const refs = extractRefs(raw);
+    if (!refs.some((ref) => targetIds.has(ref) && ref !== meta.id)) return;
     total += 1;
     if (entities.length < maxQueryResults) entities.push(entityFromRaw(meta, raw));
   });

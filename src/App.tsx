@@ -28,6 +28,7 @@ const largeTextThreshold = 25 * 1024 * 1024;
 
 type WorkerMessage =
   | { type: "query"; entities: IfcEntity[]; total: number; truncated: boolean; text: string }
+  | { type: "inverse"; key: string; entities: IfcEntity[]; total: number; truncated: boolean }
   | { type: "progress"; loadedBytes: number; totalBytes: number }
   | { type: "error"; message: string }
   | {
@@ -54,9 +55,12 @@ export default function App() {
   const [largeQueryText, setLargeQueryText] = useState("");
   const [largeQueryEntities, setLargeQueryEntities] = useState<IfcEntity[]>([]);
   const [largeQueryTotal, setLargeQueryTotal] = useState(0);
+  const [largeInverseEntities, setLargeInverseEntities] = useState<IfcEntity[]>([]);
+  const [largeInverseTotal, setLargeInverseTotal] = useState(0);
   const [largeSelectedEntity, setLargeSelectedEntity] = useState<IfcEntity>();
   const [parsing, setParsing] = useState(false);
   const [querying, setQuerying] = useState(false);
+  const [inverseQuerying, setInverseQuerying] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);
   const [filters, setFilters] = useState<FilterChip[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
@@ -65,6 +69,7 @@ export default function App() {
   const [inverseEnabled, setInverseEnabled] = useState(false);
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>(() => readSavedQueries());
   const workerRef = useRef<Worker | null>(null);
+  const inverseKeyRef = useRef("");
 
   useEffect(() => {
     workerRef.current = new Worker(new URL("./workers/ifcParser.worker.ts", import.meta.url), { type: "module" });
@@ -84,6 +89,13 @@ export default function App() {
         setLargeQueryText(event.data.text);
         setLargeQueryTotal(event.data.total);
         setQuerying(false);
+        return;
+      }
+      if (event.data.type === "inverse") {
+        if (event.data.key !== inverseKeyRef.current) return;
+        setLargeInverseEntities(event.data.entities);
+        setLargeInverseTotal(event.data.total);
+        setInverseQuerying(false);
         return;
       }
 
@@ -131,10 +143,13 @@ export default function App() {
       setLargeQueryText("");
       setLargeQueryEntities([]);
       setLargeQueryTotal(0);
+      setLargeInverseEntities([]);
+      setLargeInverseTotal(0);
       setLargeSelectedEntity(undefined);
       setSelectedId(undefined);
       setParsing(false);
       setQuerying(false);
+      setInverseQuerying(false);
       setParseProgress(0);
       return;
     }
@@ -150,6 +165,8 @@ export default function App() {
       setLargeQueryText("");
       setLargeQueryEntities([]);
       setLargeQueryTotal(0);
+      setLargeInverseEntities([]);
+      setLargeInverseTotal(0);
       setQuerying(false);
       return;
     }
@@ -209,23 +226,41 @@ export default function App() {
     return entity ? hydrateIfcEntity(sourceText, entity) : undefined;
   }, [displayIndex.byId, fullIndex.byId, largeMode, largeSelectedEntity, selectedId, sourceText]);
 
+  const inverseSeedIds = useMemo(
+    () =>
+      unique([
+        ...filters.filter((filter) => filter.type === "id").map((filter) => filter.value),
+        ...(selectedEntity ? [selectedEntity.id] : [])
+      ]),
+    [filters, selectedEntity]
+  );
+
+  useEffect(() => {
+    if (!largeMode || !largeSource || parsing || !inverseEnabled || inverseSeedIds.length === 0) {
+      inverseKeyRef.current = "";
+      setLargeInverseEntities([]);
+      setLargeInverseTotal(0);
+      setInverseQuerying(false);
+      return;
+    }
+
+    const key = inverseSeedIds.join(",");
+    inverseKeyRef.current = key;
+    setInverseQuerying(true);
+    workerRef.current?.postMessage({ type: "inverse", ids: inverseSeedIds, key });
+  }, [inverseEnabled, inverseSeedIds, largeMode, largeSource, parsing]);
+
   const inverseEntities = useMemo(() => {
-    const seedIds = unique([
-      ...filters.filter((filter) => filter.type === "id").map((filter) => filter.value),
-      ...(selectedEntity ? [selectedEntity.id] : [])
-    ]);
-    return unique(seedIds.flatMap((id) => fullIndex.incoming[id] ?? []))
+    if (largeMode) return largeInverseEntities;
+    return unique(inverseSeedIds.flatMap((id) => fullIndex.incoming[id] ?? []))
       .map((id) => fullIndex.byId[id])
       .filter((entity): entity is IfcEntity => Boolean(entity));
-  }, [filters, fullIndex, selectedEntity]);
+  }, [fullIndex, inverseSeedIds, largeInverseEntities, largeMode]);
 
   const inverseLabel = useMemo(() => {
-    const ids = unique([
-      ...filters.filter((filter) => filter.type === "id").map((filter) => filter.value),
-      ...(selectedEntity ? [selectedEntity.id] : [])
-    ]);
-    return ids.length ? ids.join(", ") : "selection";
-  }, [filters, selectedEntity]);
+    return inverseSeedIds.length ? inverseSeedIds.join(", ") : "selection";
+  }, [inverseSeedIds]);
+  const inverseCount = largeMode ? largeInverseTotal : inverseEntities.length;
 
   const querySuggestions = useMemo(() => {
     const activeToken = queryText.split(",").at(-1) ?? queryText;
@@ -531,6 +566,8 @@ export default function App() {
               inverseEntities={inverseEntities}
               inverseEnabled={inverseEnabled}
               inverseLabel={inverseLabel}
+              inverseTotal={inverseCount}
+              inverseQuerying={inverseQuerying}
               hasQuery={filters.length > 0}
               onSelectEntity={setSelectedId}
             />
@@ -546,7 +583,8 @@ export default function App() {
           trail={trail}
           savedQueries={savedQueries}
           inverseEnabled={inverseEnabled}
-          inverseCount={inverseEntities.length}
+          inverseCount={inverseCount}
+          inverseQuerying={inverseQuerying}
           onFile={openFile}
           onAddFilterValue={addFilterFromValue}
           onRemoveFilter={(id) => setFilters((current) => current.filter((chip) => chip.id !== id))}
